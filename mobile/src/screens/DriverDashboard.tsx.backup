@@ -1,0 +1,744 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, PermissionsAndroid, Platform, Modal, Switch, Image } from 'react-native';
+import MapView, { Marker, Polyline } from 'react-native-maps';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import LocationService from '../services/LocationService';
+
+export default function DriverDashboard({ navigation }: any) {
+  const { signOut, user } = useAuth();
+  const [location, setLocation] = useState<any>(null);
+  const [tracking, setTracking] = useState(false);
+  const [routeInfo, setRouteInfo] = useState<any>(null);
+  const [studentsCount, setStudentsCount] = useState(0);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [batterySaver, setBatterySaver] = useState(false);
+  const [offlineQueueSize, setOfflineQueueSize] = useState(0);
+  const [routePath, setRoutePath] = useState<any[]>([]);
+  const [busStops, setBusStops] = useState<string[]>([]);
+  const [busInfo, setBusInfo] = useState<any>(null);
+  const mapRef = useRef<MapView>(null);
+
+  useEffect(() => {
+    requestLocationPermission();
+    fetchRouteInfo();
+    fetchBusInfo();
+    getInitialLocation();
+    
+    // Update offline queue size periodically
+    const queueInterval = setInterval(() => {
+      setOfflineQueueSize(LocationService.getOfflineQueueSize());
+    }, 5000);
+    
+    return () => {
+      LocationService.stopTracking();
+      clearInterval(queueInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (tracking) {
+      startLocationTracking();
+    } else {
+      stopLocationTracking();
+    }
+  }, [tracking, batterySaver]);
+
+  const requestLocationPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
+        ]);
+        
+        if (
+          granted['android.permission.ACCESS_FINE_LOCATION'] !== PermissionsAndroid.RESULTS.GRANTED
+        ) {
+          Alert.alert('Permission denied', 'Location permission is required');
+          return;
+        }
+        
+        if (
+          granted['android.permission.ACCESS_BACKGROUND_LOCATION'] !== PermissionsAndroid.RESULTS.GRANTED
+        ) {
+          Alert.alert(
+            'Background Location',
+            'For continuous tracking, please enable background location access in settings'
+          );
+        }
+      } catch (err) {
+        console.warn(err);
+        return;
+      }
+    }
+  };
+
+  const getInitialLocation = async () => {
+    const currentLocation = await LocationService.getCurrentLocation();
+    if (currentLocation) {
+      setLocation({
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude,
+      });
+      
+      // Center map on current location
+      if (mapRef.current) {
+        mapRef.current.animateToRegion({
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+      }
+    }
+  };
+
+  const fetchRouteInfo = async () => {
+    try {
+      const { data: route } = await supabase
+        .from('routes')
+        .select(`
+          *,
+          route_students(count)
+        `)
+        .eq('driver_id', user?.id)
+        .single();
+
+      if (route) {
+        setRouteInfo(route);
+        setStudentsCount(route.route_students?.[0]?.count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching route:', error);
+    }
+  };
+
+  const fetchBusInfo = async () => {
+    try {
+      const { data: bus, error } = await supabase
+        .from('buses')
+        .select('*')
+        .eq('driver_email', user?.email)
+        .single();
+
+      if (error) throw error;
+      if (bus) {
+        setBusInfo(bus);
+        setBusStops(bus.stops || []);
+      }
+    } catch (error) {
+      console.error('Error fetching bus info:', error);
+    }
+  };
+
+  const startLocationTracking = async () => {
+    if (!user?.id) return;
+
+    await LocationService.startTracking(
+      user.id,
+      batterySaver,
+      (locationData) => {
+        const newLocation = {
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          accuracy: locationData.accuracy,
+          speed: locationData.speed,
+          heading: locationData.heading,
+        };
+        
+        setLocation(newLocation);
+        
+        // Add to route path for visualization
+        setRoutePath((prev) => [...prev.slice(-50), newLocation]); // Keep last 50 points
+        
+        // Update offline queue size
+        setOfflineQueueSize(LocationService.getOfflineQueueSize());
+      }
+    );
+  };
+
+  const stopLocationTracking = () => {
+    LocationService.stopTracking();
+    setRoutePath([]);
+  };
+
+  const toggleTracking = async () => {
+    const newTrackingState = !tracking;
+    setTracking(newTrackingState);
+    
+    // Update route status
+    if (routeInfo) {
+      try {
+        await supabase
+          .from('routes')
+          .update({ status: newTrackingState ? 'active' : 'inactive' })
+          .eq('id', routeInfo.id);
+      } catch (error) {
+        console.error('Error updating route status:', error);
+      }
+    }
+    
+    Alert.alert(
+      newTrackingState ? 'Tracking Started' : 'Tracking Stopped',
+      newTrackingState ? 'Students can now see your location' : 'Location sharing disabled'
+    );
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      navigation.replace('Login');
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Driver Dashboard</Text>
+          <Text style={styles.email}>{user?.email}</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.profileButton}
+          onPress={() => setProfileModalVisible(true)}
+        >
+          <Text style={styles.profileIcon}>👤</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView>
+        {/* Bus Route & Stops Card - Show First */}
+        {busInfo && (
+          <View style={styles.infoCard}>
+            <Text style={styles.cardTitle}>🚌 Your Bus Information</Text>
+            <Text style={styles.cardText}>
+              Bus Number: {busInfo.bus_number}
+            </Text>
+            <Text style={styles.cardText}>
+              Route: {busInfo.route_number}
+            </Text>
+            <Text style={styles.cardText}>
+              Total Stops: {busStops.length}
+            </Text>
+          </View>
+        )}
+
+        {/* Bus Stops Preview - Show Before Start Button */}
+        {busStops.length > 0 && (
+          <View style={styles.stopsCard}>
+            <Text style={styles.cardTitle}>📍 Your Pickup Points</Text>
+            <Text style={styles.stopsSubtitle}>
+              Stop at these locations to pick up students:
+            </Text>
+            {busStops.map((stop, index) => (
+              <View key={index} style={styles.stopItem}>
+                <View style={styles.stopNumber}>
+                  <Text style={styles.stopNumberText}>{index + 1}</Text>
+                </View>
+                <Text style={styles.stopText}>{stop}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Battery Saver Toggle - Before Start Button */}
+        {!tracking && (
+          <View style={styles.settingsCard}>
+            <View style={styles.settingRow}>
+              <View>
+                <Text style={styles.settingLabel}>Battery Saver Mode</Text>
+                <Text style={styles.settingDescription}>
+                  {batterySaver ? 'Lower accuracy, less battery' : 'High accuracy, more battery'}
+                </Text>
+              </View>
+              <Switch
+                value={batterySaver}
+                onValueChange={setBatterySaver}
+                disabled={tracking}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Start/Stop Tracking Button */}
+        <TouchableOpacity 
+          style={[styles.trackButton, tracking && styles.trackButtonActive]}
+          onPress={toggleTracking}
+        >
+          <Text style={styles.trackButtonText}>
+            {tracking ? '⏹️ Stop Tracking' : '▶️ Start Tracking'}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Map - Show Only When Tracking is Active */}
+        {tracking && location && (
+          <View style={styles.mapContainer}>
+            <Text style={styles.mapTitle}>�️  Live Route Map</Text>
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              showsUserLocation={true}
+              showsMyLocationButton={true}
+              followsUserLocation={tracking}
+            >
+              <Marker
+                coordinate={{
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                }}
+                title="Bus Location"
+                description={`Speed: ${location.speed ? (location.speed * 3.6).toFixed(1) : '0'} km/h`}
+                pinColor="red"
+              />
+              
+              {/* Show route path */}
+              {routePath.length > 1 && (
+                <Polyline
+                  coordinates={routePath}
+                  strokeColor="#3b82f6"
+                  strokeWidth={3}
+                />
+              )}
+            </MapView>
+          </View>
+        )}
+
+        {/* Tracking Information Card - Show When Active */}
+        {tracking && (
+          <View style={styles.infoCard}>
+            <Text style={styles.cardTitle}>📊 Live Tracking Status</Text>
+            <Text style={styles.cardText}>
+              Status: 🟢 Active - Students can see your location
+            </Text>
+            <Text style={styles.cardText}>
+              Students Tracking: {studentsCount}
+            </Text>
+            {location && (
+              <>
+                <Text style={styles.cardText}>
+                  Speed: {location.speed ? `${(location.speed * 3.6).toFixed(1)} km/h` : '0 km/h'}
+                </Text>
+                <Text style={styles.cardText}>
+                  Accuracy: {location.accuracy ? `±${location.accuracy.toFixed(0)}m` : 'N/A'}
+                </Text>
+                {location.heading !== null && (
+                  <Text style={styles.cardText}>
+                    Heading: {location.heading.toFixed(0)}°
+                  </Text>
+                )}
+              </>
+            )}
+            {offlineQueueSize > 0 && (
+              <Text style={styles.cardTextWarning}>
+                ⚠️ {offlineQueueSize} location(s) pending upload
+              </Text>
+            )}
+            <Text style={styles.cardText}>
+              Mode: {batterySaver ? '🔋 Battery Saver' : '⚡ High Accuracy'}
+            </Text>
+          </View>
+        )}
+
+        {/* Info Message When Not Tracking */}
+        {!tracking && (
+          <View style={styles.infoMessageCard}>
+            <Text style={styles.infoMessageIcon}>ℹ️</Text>
+            <Text style={styles.infoMessageText}>
+              Review your pickup points above, then tap "Start Tracking" to begin your route. 
+              The map will appear once tracking starts.
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* Profile Modal */}
+      <Modal
+        visible={profileModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>👤 Driver Profile</Text>
+              <TouchableOpacity onPress={() => setProfileModalVisible(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Driver Photo Section */}
+            {busInfo && (
+              <View style={styles.photoSection}>
+                {busInfo.driver_photo_url ? (
+                  <Image 
+                    source={{ uri: busInfo.driver_photo_url }} 
+                    style={styles.profilePhotoLarge}
+                  />
+                ) : (
+                  <View style={styles.profilePhotoPlaceholder}>
+                    <Text style={styles.profilePhotoPlaceholderText}>👤</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            <View>
+              {/* Driver Name */}
+              {busInfo?.driver_full_name && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Full Name:</Text>
+                  <Text style={styles.profileValue}>{busInfo.driver_full_name}</Text>
+                </View>
+              )}
+              
+              {/* Driver Email */}
+              <View style={styles.profileRow}>
+                <Text style={styles.profileLabel}>Email:</Text>
+                <Text style={styles.profileValue}>{user?.email}</Text>
+              </View>
+              
+              {/* Driver Mobile */}
+              {busInfo?.driver_mobile && (
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Mobile:</Text>
+                  <Text style={styles.profileValue}>{busInfo.driver_mobile}</Text>
+                </View>
+              )}
+              
+              {/* User ID */}
+              <View style={styles.profileRow}>
+                <Text style={styles.profileLabel}>User ID:</Text>
+                <Text style={styles.profileValue}>{user?.id?.substring(0, 8)}...</Text>
+              </View>
+              
+              {/* Role Badge */}
+              <View style={styles.profileRow}>
+                <Text style={styles.profileLabel}>Role:</Text>
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>🚗 Driver</Text>
+                </View>
+              </View>
+              
+              {/* Bus Information */}
+              {busInfo && (
+                <>
+                  <View style={styles.profileRow}>
+                    <Text style={styles.profileLabel}>Bus Number:</Text>
+                    <Text style={styles.profileValue}>{busInfo.bus_number}</Text>
+                  </View>
+                  <View style={styles.profileRow}>
+                    <Text style={styles.profileLabel}>Route:</Text>
+                    <Text style={styles.profileValue}>{busInfo.route_number}</Text>
+                  </View>
+                  <View style={styles.profileRow}>
+                    <Text style={styles.profileLabel}>Total Stops:</Text>
+                    <Text style={styles.profileValue}>{busStops.length}</Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={styles.closeModalButton}
+              onPress={() => setProfileModalVisible(false)}
+            >
+              <Text style={styles.closeModalText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    padding: 20,
+    backgroundColor: '#1e3a8a',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  profileButton: {
+    backgroundColor: 'white',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  profileIcon: {
+    fontSize: 24,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  email: {
+    fontSize: 14,
+    color: '#ddd',
+    marginTop: 5,
+  },
+  mapContainer: {
+    height: 350,
+    margin: 15,
+    marginTop: 0,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    padding: 10,
+  },
+  mapTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1e3a8a',
+    marginBottom: 10,
+    paddingHorizontal: 5,
+  },
+  map: {
+    height: 300,
+    borderRadius: 8,
+  },
+  trackButton: {
+    backgroundColor: '#16a34a',
+    margin: 15,
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  trackButtonActive: {
+    backgroundColor: '#dc2626',
+  },
+  trackButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  infoCard: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 20,
+    borderRadius: 10,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#1e3a8a',
+  },
+  cardText: {
+    fontSize: 14,
+    marginBottom: 5,
+    color: '#666',
+  },
+  cardTextWarning: {
+    fontSize: 14,
+    marginBottom: 5,
+    color: '#f59e0b',
+    fontWeight: '600',
+  },
+  settingsCard: {
+    backgroundColor: 'white',
+    margin: 15,
+    marginTop: 0,
+    padding: 15,
+    borderRadius: 10,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  settingDescription: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  stopsCard: {
+    backgroundColor: 'white',
+    margin: 15,
+    marginTop: 0,
+    padding: 20,
+    borderRadius: 10,
+  },
+  stopsSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 15,
+    fontStyle: 'italic',
+  },
+  stopItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  stopNumber: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#1e3a8a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  stopNumberText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  stopText: {
+    fontSize: 15,
+    color: '#333',
+    flex: 1,
+    fontWeight: '500',
+  },
+  infoMessageCard: {
+    backgroundColor: '#dbeafe',
+    margin: 15,
+    marginTop: 0,
+    padding: 20,
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  infoMessageIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  infoMessageText: {
+    fontSize: 14,
+    color: '#1e40af',
+    flex: 1,
+    lineHeight: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    width: '85%',
+    borderRadius: 10,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1e3a8a',
+  },
+  closeButton: {
+    fontSize: 24,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  profileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  profileLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+  profileValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  closeModalButton: {
+    backgroundColor: '#1e3a8a',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  closeModalText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  photoSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  profilePhotoLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: '#1e3a8a',
+  },
+  profilePhotoPlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#e5e7eb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#1e3a8a',
+  },
+  profilePhotoPlaceholderText: {
+    fontSize: 60,
+  },
+  roleBadge: {
+    backgroundColor: '#1e3a8a',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  roleBadgeText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+});

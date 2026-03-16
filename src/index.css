@@ -1,0 +1,337 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+
+@layer base {
+  :root {
+    /* Navy Blue Travel Theme */
+    --background: 220 25% 97%;
+    --foreground: 220 50% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 50% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 50% 12%;
+
+    /* Primary: Deep Navy */
+    --primary: 220 60% 25%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Soft Sky Blue */
+    --secondary: 210 80% 95%;
+    --secondary-foreground: 220 60% 25%;
+
+    /* Muted: Gentle Gray-Blue */
+    --muted: 220 20% 94%;
+    --muted-foreground: 220 15% 45%;
+
+    /* Accent: Ocean Teal */
+    --accent: 185 65% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 88%;
+    --input: 220 20% 88%;
+    --ring: 220 60% 25%;
+
+    --radius: 0.75rem;
+
+    /* Custom Travel Theme Colors */
+    --navy-dark: 220 65% 18%;
+    --navy-medium: 220 60% 25%;
+    --navy-light: 220 55% 35%;
+    --sky: 200 85% 55%;
+    --sky-light: 200 90% 92%;
+    --ocean: 185 65% 45%;
+    --ocean-dark: 185 60% 35%;
+    --sunset: 25 95% 55%;
+    --sunset-light: 30 100% 95%;
+
+    /* Gradients */
+    --gradient-hero: linear-gradient(135deg, hsl(220 65% 18%) 0%, hsl(220 55% 35%) 50%, hsl(185 65% 45%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 25% 97%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(185 65% 45%) 0%, hsl(200 85% 55%) 100%);
+    --gradient-sunset: linear-gradient(135deg, hsl(25 95% 55%) 0%, hsl(40 100% 60%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px hsl(220 60% 25% / 0.05);
+    --shadow-md: 0 4px 12px hsl(220 60% 25% / 0.08);
+    --shadow-lg: 0 8px 24px hsl(220 60% 25% / 0.12);
+    --shadow-glow: 0 0 20px hsl(185 65% 45% / 0.3);
+
+    --sidebar-background: 220 65% 18%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 185 65% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 55% 25%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 220 50% 25%;
+    --sidebar-ring: 185 65% 45%;
+  }
+
+  .dark {
+    --background: 220 50% 8%;
+    --foreground: 220 20% 95%;
+
+    --card: 220 45% 12%;
+    --card-foreground: 220 20% 95%;
+
+    --popover: 220 45% 12%;
+    --popover-foreground: 220 20% 95%;
+
+    --primary: 185 65% 50%;
+    --primary-foreground: 220 65% 10%;
+
+    --secondary: 220 45% 18%;
+    --secondary-foreground: 220 20% 90%;
+
+    --muted: 220 40% 16%;
+    --muted-foreground: 220 15% 60%;
+
+    --accent: 185 60% 50%;
+    --accent-foreground: 220 65% 10%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 40% 20%;
+    --input: 220 40% 20%;
+    --ring: 185 65% 50%;
+
+    --navy-dark: 220 60% 10%;
+    --navy-medium: 220 55% 18%;
+    --navy-light: 220 50% 28%;
+
+    --sidebar-background: 220 50% 6%;
+    --sidebar-foreground: 220 20% 95%;
+    --sidebar-primary: 185 65% 50%;
+    --sidebar-primary-foreground: 220 65% 10%;
+    --sidebar-accent: 220 45% 15%;
+    --sidebar-accent-foreground: 220 20% 95%;
+    --sidebar-border: 220 40% 15%;
+    --sidebar-ring: 185 65% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-weight: 700;
+  }
+
+  .font-mono {
+    font-family: 'Space Mono', monospace;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+  }
+
+  .glass-dark {
+    background: hsl(var(--navy-dark) / 0.9);
+    backdrop-filter: blur(20px);
+    border: 1px solid hsl(var(--navy-light) / 0.3);
+  }
+
+  .gradient-hero {
+    background: var(--gradient-hero);
+  }
+
+  .gradient-accent {
+    background: var(--gradient-accent);
+  }
+
+  .gradient-sunset {
+    background: var(--gradient-sunset);
+  }
+
+  .text-gradient {
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.6s ease-out forwards;
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.5s ease-out forwards;
+  }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Map container styles */
+.map-container {
+  @apply relative w-full h-full rounded-xl overflow-hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Bus marker pulse */
+.bus-marker {
+  @apply relative;
+}
+
+.bus-marker::before {
+  content: '';
+  @apply absolute inset-0 rounded-full;
+  background: hsl(var(--ocean));
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes ping {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Mobile-specific improvements */
+@media (max-width: 640px) {
+  /* Better touch targets */
+  button, a, input, select, textarea {
+    min-height: 44px;
+  }
+
+  /* Prevent text size adjustment on orientation change */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Better tap highlight */
+  * {
+    -webkit-tap-highlight-color: rgba(30, 58, 138, 0.1);
+  }
+
+  /* Prevent zoom on input focus */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="number"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Safe area for notched devices */
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Better modal sizing on mobile */
+  .modal-mobile {
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  /* Improved scrollbar for mobile */
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(30, 58, 138, 0.3);
+    border-radius: 2px;
+  }
+}
+
+/* Landscape mode adjustments */
+@media (max-width: 896px) and (orientation: landscape) {
+  .landscape-compact {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
+/* High DPI screens */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Sharper borders and shadows */
+  .shadow-md {
+    box-shadow: 0 2px 8px rgba(30, 58, 138, 0.12);
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Better mobile scrolling */
+body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+/* Prevent pull-to-refresh on mobile */
+body {
+  overscroll-behavior-y: none;
+}

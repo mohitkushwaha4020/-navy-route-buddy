@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Background color -->
+  <item android:drawable="@color/splashscreen_background"/>
+  
+  <!-- App logo/icon in center -->
+  <item>
+    <shape android:shape="oval">
+      <solid android:color="#FFFFFF"/>
+      <size android:width="120dp" android:height="120dp"/>
+    </shape>
+  </item>
+  
+  <!-- App name text would go here if we had a text drawable -->
+</layer-list>

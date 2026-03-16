@@ -1,0 +1,884 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, PermissionsAndroid, Platform, Modal, Image, ActivityIndicator } from 'react-native';
+import MapView, { Marker, Polyline, Circle } from 'react-native-maps';
+import Geolocation from '@react-native-community/geolocation';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+
+export default function StudentDashboard({ navigation }: any) {
+  const { user } = useAuth();
+  const [location, setLocation] = useState<any>(null);
+  const [busLocation, setBusLocation] = useState<any>(null);
+  const [studentDetails, setStudentDetails] = useState<any>(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [photoOptionsVisible, setPhotoOptionsVisible] = useState(false);
+  const [busDriverId, setBusDriverId] = useState<string | null>(null);
+  const [availableBuses, setAvailableBuses] = useState<any[]>([]);
+  const [distance, setDistance] = useState<number | null>(null);
+  const [eta, setEta] = useState<string>('Calculating...');
+  const mapRef = useRef<MapView>(null);
+  const locationSubscription = useRef<any>(null);
+
+  useEffect(() => {
+    fetchStudentDetails();
+    requestLocationPermission();
+    
+    return () => {
+      // Cleanup subscription
+      if (locationSubscription.current) {
+        supabase.removeChannel(locationSubscription.current);
+      }
+    };
+  }, []);
+
+  // Subscribe to bus location when driver ID is available
+  useEffect(() => {
+    if (busDriverId) {
+      subscribeToBusLocation();
+    }
+    
+    return () => {
+      if (locationSubscription.current) {
+        supabase.removeChannel(locationSubscription.current);
+      }
+    };
+  }, [busDriverId]);
+
+  // Calculate distance and ETA when locations change
+  useEffect(() => {
+    if (location && busLocation) {
+      const dist = calculateDistance(
+        location.latitude,
+        location.longitude,
+        busLocation.latitude,
+        busLocation.longitude
+      );
+      setDistance(dist);
+      
+      // Calculate ETA based on distance and average speed
+      const avgSpeed = busLocation.speed || 30; // km/h
+      const timeInHours = dist / avgSpeed;
+      const timeInMinutes = Math.round(timeInHours * 60);
+      
+      if (timeInMinutes < 1) {
+        setEta('Arriving now');
+      } else if (timeInMinutes === 1) {
+        setEta('1 minute');
+      } else {
+        setEta(`${timeInMinutes} minutes`);
+      }
+      
+      // Fit map to show both markers
+      if (mapRef.current) {
+        mapRef.current.fitToCoordinates(
+          [location, busLocation],
+          {
+            edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+            animated: true,
+          }
+        );
+      }
+    }
+  }, [location, busLocation]);
+
+  const requestLocationPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Location Permission',
+            message: 'This app needs access to your location',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Permission denied', 'Location permission is required');
+          return;
+        }
+      } catch (err) {
+        console.warn(err);
+        return;
+      }
+    }
+
+    Geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+      },
+      (error) => {
+        console.error(error);
+        Alert.alert('Error', 'Failed to get location');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    );
+  };
+
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
+  const subscribeToBusLocation = () => {
+    if (!busDriverId) return;
+
+    // Subscribe to real-time location updates
+    locationSubscription.current = supabase
+      .channel(`bus-location-${busDriverId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'locations',
+          filter: `user_id=eq.${busDriverId}`,
+        },
+        (payload) => {
+          console.log('Bus location update:', payload);
+          if (payload.new) {
+            setBusLocation({
+              latitude: payload.new.latitude,
+              longitude: payload.new.longitude,
+              speed: payload.new.speed,
+              accuracy: payload.new.accuracy,
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Subscription status:', status);
+      });
+
+    // Also fetch initial location
+    fetchBusLocation();
+  };
+
+  const fetchBusLocation = async () => {
+    if (!busDriverId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('locations')
+        .select('*')
+        .eq('user_id', busDriverId)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setBusLocation({
+          latitude: data.latitude,
+          longitude: data.longitude,
+          speed: data.speed,
+          accuracy: data.accuracy,
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching bus location:', error);
+    }
+  };
+
+  const fetchStudentDetails = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('approved_students')
+        .select('*')
+        .eq('email', user?.email)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setStudentDetails(data);
+        
+        // Get pickup address and find all buses that stop there
+        const pickupAddr = (data as any).pickup_address;
+        if (pickupAddr) {
+          await fetchBusesForPickupAddress(pickupAddr);
+        } else {
+          Alert.alert(
+            'No Pickup Address',
+            'You have not been assigned a pickup address yet. Please contact admin.'
+          );
+        }
+      }
+    } catch (error: any) {
+      console.error('Error fetching student details:', error);
+      Alert.alert('Error', 'Failed to load your details. Please try again.');
+    }
+  };
+
+  const fetchBusesForPickupAddress = async (pickupAddress: string) => {
+    try {
+      // Find all buses that have this pickup address in their stops
+      const { data, error } = await supabase
+        .from('buses')
+        .select('*')
+        .contains('stops', [pickupAddress]);
+
+      if (error) throw error;
+      
+      if (data && data.length > 0) {
+        setAvailableBuses(data);
+        // Get all driver IDs
+        const driverIds = data
+          .filter(bus => bus.driver_id)
+          .map(bus => bus.driver_id);
+        setBusDriverIds(driverIds);
+      } else {
+        Alert.alert(
+          'No Buses Found',
+          `No buses stop at "${pickupAddress}". Please contact admin.`
+        );
+      }
+    } catch (error: any) {
+      console.error('Error fetching buses:', error);
+    }
+  };
+
+  const handlePhotoSelection = () => {
+    setPhotoOptionsVisible(true);
+  };
+
+  const handleTakePhoto = async () => {
+    setPhotoOptionsVisible(false);
+    
+    // Request camera permission
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Camera Permission',
+            message: 'This app needs access to your camera',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Permission denied', 'Camera permission is required');
+          return;
+        }
+      } catch (err) {
+        console.warn(err);
+        return;
+      }
+    }
+
+    const result = await launchCamera({
+      mediaType: 'photo',
+      quality: 0.8,
+      maxWidth: 800,
+      maxHeight: 800,
+      cameraType: 'front',
+    });
+
+    if (!result.didCancel && result.assets && result.assets[0]) {
+      uploadPhoto(result.assets[0]);
+    }
+  };
+
+  const handleChooseFromGallery = async () => {
+    setPhotoOptionsVisible(false);
+    
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      quality: 0.8,
+      maxWidth: 800,
+      maxHeight: 800,
+    });
+
+    if (!result.didCancel && result.assets && result.assets[0]) {
+      uploadPhoto(result.assets[0]);
+    }
+  };
+
+  const uploadPhoto = async (asset: any) => {
+    try {
+      if (!asset.uri) {
+        Alert.alert('Error', 'Failed to get image');
+        return;
+      }
+
+      setUploading(true);
+
+      // Get file extension
+      const fileExt = asset.fileName?.split('.').pop() || 'jpg';
+      const fileName = `${user?.id}/${Date.now()}.${fileExt}`;
+
+      // Create FormData for upload
+      const formData = new FormData();
+      formData.append('file', {
+        uri: asset.uri,
+        type: asset.type || 'image/jpeg',
+        name: asset.fileName || `photo.${fileExt}`,
+      } as any);
+
+      // Upload using fetch directly to Supabase Storage API
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('Not authenticated');
+      }
+
+      const uploadResponse = await fetch(
+        `https://nexejauijbarxxxbdpuk.supabase.co/storage/v1/object/profile-photos/${fileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: formData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(`Upload failed: ${errorText}`);
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('profile-photos')
+        .getPublicUrl(fileName);
+
+      // Update database
+      const { error: updateError } = await supabase
+        .from('approved_students')
+        .update({ profile_photo_url: urlData.publicUrl })
+        .eq('email', user?.email);
+
+      if (updateError) throw updateError;
+
+      Alert.alert('Success', 'Profile photo updated successfully!');
+      fetchStudentDetails();
+    } catch (error: any) {
+      console.error('Error uploading photo:', error);
+      Alert.alert('Error', error.message || 'Failed to upload photo');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Student Dashboard</Text>
+          <Text style={styles.email}>{user?.email}</Text>
+        </View>
+        <TouchableOpacity 
+          style={styles.profileButton}
+          onPress={() => setProfileModalVisible(true)}
+        >
+          {studentDetails?.profile_photo_url ? (
+            <Image 
+              source={{ uri: studentDetails.profile_photo_url }} 
+              style={styles.profileImage}
+            />
+          ) : (
+            <Text style={styles.profileIcon}>👤</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView>
+
+        <View style={styles.mapContainer}>
+          {location && (
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={{
+                latitude: location.latitude,
+                longitude: location.longitude,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+              }}
+              showsUserLocation={true}
+              showsMyLocationButton={true}
+            >
+              {/* Student Location */}
+              <Marker
+                coordinate={{
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                }}
+                title="Your Location"
+                description="You are here"
+                pinColor="blue"
+              />
+              
+              {/* Student Location Circle */}
+              <Circle
+                center={{
+                  latitude: location.latitude,
+                  longitude: location.longitude,
+                }}
+                radius={100}
+                fillColor="rgba(59, 130, 246, 0.2)"
+                strokeColor="rgba(59, 130, 246, 0.5)"
+                strokeWidth={2}
+              />
+              
+              {/* Bus Location */}
+              {busLocation && (
+                <>
+                  <Marker
+                    coordinate={busLocation}
+                    title="Bus Location"
+                    description={`Speed: ${busLocation.speed ? (busLocation.speed * 3.6).toFixed(1) : '0'} km/h`}
+                    pinColor="red"
+                  />
+                  
+                  {/* Bus Accuracy Circle */}
+                  {busLocation.accuracy && (
+                    <Circle
+                      center={busLocation}
+                      radius={busLocation.accuracy}
+                      fillColor="rgba(220, 38, 38, 0.1)"
+                      strokeColor="rgba(220, 38, 38, 0.3)"
+                      strokeWidth={1}
+                    />
+                  )}
+                  
+                  {/* Line connecting student and bus */}
+                  <Polyline
+                    coordinates={[location, busLocation]}
+                    strokeColor="#f59e0b"
+                    strokeWidth={2}
+                    lineDashPattern={[5, 5]}
+                  />
+                </>
+              )}
+            </MapView>
+          )}
+        </View>
+
+        {/* Student's Assigned Bus Info */}
+        {studentDetails && (studentDetails as any).buses && (
+          <View style={styles.infoCard}>
+            <Text style={styles.cardTitle}>🚌 Your Assigned Bus</Text>
+            <Text style={styles.cardText}>
+              Bus Number: {(studentDetails as any).buses.bus_number}
+            </Text>
+            <Text style={styles.cardText}>
+              Route: {(studentDetails as any).buses.route_number}
+            </Text>
+            <Text style={styles.cardText}>
+              📍 Your Pickup Point: {(studentDetails as any).pickup_address}
+            </Text>
+          </View>
+        )}
+
+        {/* Bus Status Card */}
+        <View style={styles.infoCard}>
+          <Text style={styles.cardTitle}>📊 Live Bus Status</Text>
+          {busLocation ? (
+            <>
+              <Text style={styles.cardText}>
+                Status: 🟢 Bus is on the way
+              </Text>
+              {distance !== null && (
+                <Text style={styles.cardText}>
+                  Distance to your pickup: {distance.toFixed(2)} km
+                </Text>
+              )}
+              <Text style={styles.cardText}>
+                Estimated Arrival: {eta}
+              </Text>
+              {busLocation.speed && (
+                <Text style={styles.cardText}>
+                  Bus Speed: {(busLocation.speed * 3.6).toFixed(1)} km/h
+                </Text>
+              )}
+              <Text style={styles.cardTextSmall}>
+                📍 Live tracking active • Updates every 5 seconds
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.cardText}>Status: 🔴 Bus not tracking</Text>
+              <Text style={styles.cardTextSmall}>
+                Waiting for driver to start tracking...
+              </Text>
+            </>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Photo Options Modal */}
+      <Modal
+        visible={photoOptionsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPhotoOptionsVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.optionsModal}>
+            <Text style={styles.optionsTitle}>Select Photo</Text>
+            
+            <TouchableOpacity 
+              style={styles.optionButton}
+              onPress={handleTakePhoto}
+            >
+              <Text style={styles.optionIcon}>📷</Text>
+              <Text style={styles.optionText}>Take Photo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.optionButton}
+              onPress={handleChooseFromGallery}
+            >
+              <Text style={styles.optionIcon}>🖼️</Text>
+              <Text style={styles.optionText}>Choose from Gallery</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setPhotoOptionsVisible(false)}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Profile Modal */}
+      <Modal
+        visible={profileModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setProfileModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>👤 My Profile</Text>
+              <TouchableOpacity onPress={() => setProfileModalVisible(false)}>
+                <Text style={styles.closeButton}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {studentDetails ? (
+              <View>
+                {/* Profile Photo Section */}
+                <View style={styles.photoSection}>
+                  {studentDetails.profile_photo_url ? (
+                    <Image 
+                      source={{ uri: studentDetails.profile_photo_url }} 
+                      style={styles.profilePhotoLarge}
+                    />
+                  ) : (
+                    <View style={styles.profilePhotoPlaceholder}>
+                      <Text style={styles.profilePhotoPlaceholderText}>👤</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity 
+                    style={styles.changePhotoButton}
+                    onPress={handlePhotoSelection}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <Text style={styles.changePhotoText}>
+                        {studentDetails.profile_photo_url ? 'Change Photo' : 'Add Photo'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Student ID:</Text>
+                  <Text style={styles.profileValue}>{studentDetails.student_id}</Text>
+                </View>
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Full Name:</Text>
+                  <Text style={styles.profileValue}>{studentDetails.full_name}</Text>
+                </View>
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Email:</Text>
+                  <Text style={styles.profileValue}>{studentDetails.email}</Text>
+                </View>
+                {studentDetails.phone && (
+                  <View style={styles.profileRow}>
+                    <Text style={styles.profileLabel}>Phone:</Text>
+                    <Text style={styles.profileValue}>{studentDetails.phone}</Text>
+                  </View>
+                )}
+                <View style={styles.profileRow}>
+                  <Text style={styles.profileLabel}>Status:</Text>
+                  <View style={[
+                    styles.statusBadge,
+                    { backgroundColor: studentDetails.is_approved ? '#10b981' : '#dc2626' }
+                  ]}>
+                    <Text style={styles.statusText}>
+                      {studentDetails.is_approved ? 'Approved' : 'Suspended'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.loadingText}>Loading profile...</Text>
+            )}
+
+            <TouchableOpacity 
+              style={styles.closeModalButton}
+              onPress={() => setProfileModalVisible(false)}
+            >
+              <Text style={styles.closeModalText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    padding: 20,
+    backgroundColor: '#1e3a8a',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  email: {
+    fontSize: 14,
+    color: '#ddd',
+    marginTop: 5,
+  },
+  profileButton: {
+    backgroundColor: 'white',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  profileIcon: {
+    fontSize: 24,
+  },
+  profileImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  photoSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  profilePhotoLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 15,
+  },
+  profilePhotoPlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#e5e7eb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  profilePhotoPlaceholderText: {
+    fontSize: 60,
+  },
+  changePhotoButton: {
+    backgroundColor: '#1e3a8a',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  changePhotoText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  mapContainer: {
+    height: 300,
+    margin: 15,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  map: {
+    flex: 1,
+  },
+  infoCard: {
+    backgroundColor: 'white',
+    margin: 15,
+    padding: 20,
+    borderRadius: 10,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#1e3a8a',
+  },
+  cardText: {
+    fontSize: 14,
+    marginBottom: 5,
+    color: '#666',
+  },
+  cardTextSmall: {
+    fontSize: 12,
+    marginTop: 5,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    width: '85%',
+    borderRadius: 10,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1e3a8a',
+  },
+  closeButton: {
+    fontSize: 24,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  profileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  profileLabel: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+  profileValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 5,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  loadingText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 14,
+    padding: 20,
+  },
+  closeModalButton: {
+    backgroundColor: '#1e3a8a',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  closeModalText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  optionsModal: {
+    backgroundColor: 'white',
+    width: '80%',
+    borderRadius: 15,
+    padding: 20,
+  },
+  optionsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1e3a8a',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  optionIcon: {
+    fontSize: 24,
+    marginRight: 15,
+  },
+  optionText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    backgroundColor: '#dc2626',
+    padding: 15,
+    borderRadius: 10,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  cancelText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+});
