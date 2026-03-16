@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
+import path from 'path';
 import { supabase } from './lib/supabase';
 import authRoutes from './routes/auth';
 import locationRoutes from './routes/location';
@@ -26,6 +27,15 @@ app.use('/api/notifications', notificationRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Serve frontend static files
+const frontendDist = path.join(__dirname, '../../dist');
+app.use(express.static(frontendDist));
+
+// All non-API routes serve the frontend
+app.get('*', (req, res) => {
+  res.sendFile(path.join(frontendDist, 'index.html'));
 });
 
 // WebSocket for real-time location updates
