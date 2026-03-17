@@ -12,7 +12,7 @@ interface MapPlaceholderProps {
 }
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-const DEFAULT_CENTER = { lat: 28.6139, lng: 77.209 };
+const DEFAULT_CENTER = { lat: 23.1815, lng: 79.9864 }; // Jabalpur, MP
 
 declare global {
   interface Window {

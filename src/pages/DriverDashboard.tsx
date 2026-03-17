@@ -277,8 +277,8 @@ const DriverDashboard = () => {
 
               <MapPlaceholder 
                 className="h-[300px] sm:h-[400px]" 
-                busPosition={{ lat: 28.6139, lng: 77.2090 }}
-                userStopPosition={{ lat: 28.6200, lng: 77.2150 }}
+                busPosition={{ lat: 23.1815, lng: 79.9864 }}
+                userStopPosition={{ lat: 23.1900, lng: 79.9950 }}
               />
               
               {/* Navigation overlay */}
