@@ -106,7 +106,7 @@ function GoogleMap({
     });
   }, []);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
 }
 
 export const MapPlaceholder = ({
@@ -160,7 +160,7 @@ export const MapPlaceholder = ({
             </button>
           </div>
           {/* Full map */}
-          <div className="flex-1">
+          <div style={{ height: "calc(100vh - 56px)", width: "100%" }}>
             <GoogleMap
               containerRef={fullscreenMapRef}
               mapCenter={mapCenter}
