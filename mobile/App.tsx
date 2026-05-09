@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AuthProvider } from './src/contexts/AuthContext';
 import { SettingsProvider } from './src/contexts/SettingsContext';
 import { LocationProvider } from './src/contexts/LocationContext';
 import { NotificationProvider } from './src/contexts/NotificationContext';
@@ -21,8 +22,24 @@ import { ActivityIndicator, View, TouchableOpacity, Text } from 'react-native';
 const Stack = createNativeStackNavigator();
 
 function Navigation() {
-  const { user, loading } = useAuth();
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [drawerVisible, setDrawerVisible] = useState(false);
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const role = await AsyncStorage.getItem('userRole');
+      setUserRole(role);
+    } catch {
+      setUserRole(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -33,129 +50,64 @@ function Navigation() {
   }
 
   const MenuButton = ({ navigation }: any) => (
-    <TouchableOpacity
-      onPress={() => setDrawerVisible(true)}
-      style={{ marginLeft: 15 }}
-    >
+    <TouchableOpacity onPress={() => setDrawerVisible(true)} style={{ marginLeft: 15 }}>
       <Text style={{ color: '#1e3a8a', fontSize: 24 }}>☰</Text>
     </TouchableOpacity>
+  );
+
+  // Pass setUserRole to LoginScreen so it can trigger re-render after login
+  const LoginScreenWrapper = (props: any) => (
+    <LoginScreen {...props} onLoginSuccess={(role: string) => setUserRole(role)} />
   );
 
   return (
     <>
       <Stack.Navigator>
-        {!user ? (
+        {!userRole ? (
+          <Stack.Screen
+            name="Login"
+            component={LoginScreenWrapper}
+            options={{ headerShown: false }}
+          />
+        ) : userRole === 'admin' ? (
           <>
-            <Stack.Screen 
-              name="Login" 
-              component={LoginScreen}
-              options={{ headerShown: false }}
-            />
+            <Stack.Screen name="AdminDashboard" component={AdminDashboard}
+              options={({ navigation }) => ({ title: 'Admin Dashboard', headerLeft: () => <MenuButton navigation={navigation} /> })} />
+            <Stack.Screen name="ManageBuses" component={ManageBuses} options={{ title: 'Manage Buses' }} />
+            <Stack.Screen name="ManageStudents" component={ManageStudents} options={{ title: 'Manage Students' }} />
+            <Stack.Screen name="ActiveRoutesMap" component={ActiveRoutesMap} options={{ title: 'Active Routes', headerShown: false }} />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettings} options={{ title: 'Profile' }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
+          </>
+        ) : userRole === 'driver' ? (
+          <>
+            <Stack.Screen name="DriverDashboard" component={DriverDashboard}
+              options={({ navigation }) => ({ title: 'Driver Dashboard', headerLeft: () => <MenuButton navigation={navigation} /> })} />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettings} options={{ title: 'Profile' }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
           </>
         ) : (
           <>
-            {user.user_metadata?.role === 'admin' ? (
-              <>
-                <Stack.Screen 
-                  name="AdminDashboard" 
-                  component={AdminDashboard}
-                  options={({ navigation }) => ({
-                    title: 'Admin Dashboard',
-                    headerLeft: () => <MenuButton navigation={navigation} />,
-                  })}
-                />
-                <Stack.Screen 
-                  name="ManageBuses" 
-                  component={ManageBuses}
-                  options={{ title: 'Manage Buses' }}
-                />
-                <Stack.Screen 
-                  name="ManageStudents" 
-                  component={ManageStudents}
-                  options={{ title: 'Manage Students' }}
-                />
-                <Stack.Screen 
-                  name="ActiveRoutesMap" 
-                  component={ActiveRoutesMap}
-                  options={{ title: 'Active Routes', headerShown: false }}
-                />
-                <Stack.Screen 
-                  name="ProfileSettings" 
-                  component={ProfileSettings}
-                  options={{ title: 'Profile' }}
-                />
-                <Stack.Screen 
-                  name="Settings" 
-                  component={SettingsScreen}
-                  options={{ title: 'Settings' }}
-                />
-                <Stack.Screen 
-                  name="Notifications" 
-                  component={NotificationsScreen}
-                  options={{ title: 'Notifications' }}
-                />
-              </>
-            ) : user.user_metadata?.role === 'driver' ? (
-              <>
-                <Stack.Screen 
-                  name="DriverDashboard" 
-                  component={DriverDashboard}
-                  options={({ navigation }) => ({
-                    title: 'Driver Dashboard',
-                    headerLeft: () => <MenuButton navigation={navigation} />,
-                  })}
-                />
-                <Stack.Screen 
-                  name="ProfileSettings" 
-                  component={ProfileSettings}
-                  options={{ title: 'Profile' }}
-                />
-                <Stack.Screen 
-                  name="Settings" 
-                  component={SettingsScreen}
-                  options={{ title: 'Settings' }}
-                />
-                <Stack.Screen 
-                  name="Notifications" 
-                  component={NotificationsScreen}
-                  options={{ title: 'Notifications' }}
-                />
-              </>
-            ) : (
-              <>
-                <Stack.Screen 
-                  name="StudentDashboard" 
-                  component={StudentDashboard}
-                  options={({ navigation }) => ({
-                    title: 'Student Dashboard',
-                    headerLeft: () => <MenuButton navigation={navigation} />,
-                  })}
-                />
-                <Stack.Screen 
-                  name="ProfileSettings" 
-                  component={ProfileSettings}
-                  options={{ title: 'Profile' }}
-                />
-                <Stack.Screen 
-                  name="Settings" 
-                  component={SettingsScreen}
-                  options={{ title: 'Settings' }}
-                />
-                <Stack.Screen 
-                  name="Notifications" 
-                  component={NotificationsScreen}
-                  options={{ title: 'Notifications' }}
-                />
-              </>
-            )}
+            <Stack.Screen name="StudentDashboard" component={StudentDashboard}
+              options={({ navigation }) => ({ title: 'Student Dashboard', headerLeft: () => <MenuButton navigation={navigation} /> })} />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettings} options={{ title: 'Profile' }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
           </>
         )}
       </Stack.Navigator>
-      
-      {user && (
+
+      {userRole && (
         <SideDrawer
           visible={drawerVisible}
           onClose={() => setDrawerVisible(false)}
+          onLogout={() => {
+            AsyncStorage.removeItem('userRole');
+            AsyncStorage.removeItem('currentUser');
+            setUserRole(null);
+          }}
         />
       )}
     </>

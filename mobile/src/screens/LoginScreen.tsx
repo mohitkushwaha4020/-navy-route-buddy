@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, ScrollView, Platform } from 'react-native';
-import { useAuth } from '../contexts/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSettings } from '../contexts/SettingsContext';
 import { supabase } from '../lib/supabase';
 
-export default function LoginScreen({ navigation }: any) {
+export default function LoginScreen({ navigation, onLoginSuccess }: any) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState<'student' | 'driver' | 'admin'>('student');
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
   const { t } = useSettings();
 
   const handleLogin = async () => {
@@ -21,77 +20,74 @@ export default function LoginScreen({ navigation }: any) {
 
     setLoading(true);
     try {
-      if (role === 'student') {
-        // Student login - check approved_students table by email
-        const { data: student } = await supabase
+      if (role === 'admin') {
+        // Admin hardcoded
+        if (identifier === 'admin@busbay.com' && password === 'admin123') {
+          await AsyncStorage.setItem('currentUser', JSON.stringify({ role: 'admin', email: identifier }));
+          await AsyncStorage.setItem('userRole', 'admin');
+        } else {
+          Alert.alert('Login Failed', 'Invalid admin credentials');
+          setLoading(false);
+          return;
+        }
+      } else if (role === 'student') {
+        // Student - check approved_students table directly
+        const { data: student, error } = await supabase
           .from('approved_students')
           .select('*')
           .eq('email', identifier)
+          .eq('password', password)
           .eq('is_approved', true)
           .single();
 
-        if (!student) {
-          Alert.alert('Login Failed', 'Email not found or not approved. Contact admin.');
+        if (error || !student) {
+          Alert.alert('Login Failed', 'Invalid email or password. Contact admin.');
           setLoading(false);
           return;
         }
 
-        if (student.password !== password) {
-          Alert.alert('Login Failed', 'Invalid Email or Password');
-          setLoading(false);
-          return;
-        }
+        await AsyncStorage.setItem('currentUser', JSON.stringify({ 
+          role: 'student', 
+          email: identifier,
+          id: student.id,
+          name: student.full_name,
+          pickupAddress: student.pickup_address,
+          busId: student.bus_id,
+        }));
+        await AsyncStorage.setItem('userRole', 'student');
 
-        // Student validated - just use signIn (don't create new account)
-        // The password from approved_students table should match Supabase auth password
-        try {
-          await signIn(identifier, password);
-        } catch (authError: any) {
-          Alert.alert('Login Failed', 'Invalid email or password. Please check your credentials.');
-          setLoading(false);
-          return;
-        }
       } else if (role === 'driver') {
-        // Driver login - check buses table for driver credentials
-        const { data: bus } = await supabase
+        // Driver - check buses table directly
+        const { data: bus, error } = await supabase
           .from('buses')
           .select('*')
           .eq('driver_email', identifier)
+          .eq('driver_password', password)
           .single();
 
-        if (!bus) {
-          Alert.alert('Login Failed', 'Driver email not found. Contact admin.');
+        if (error || !bus) {
+          Alert.alert('Login Failed', 'Invalid email or password. Contact admin.');
           setLoading(false);
           return;
         }
 
-        if (bus.driver_password !== password) {
-          Alert.alert('Login Failed', 'Invalid Email or Password');
-          setLoading(false);
-          return;
-        }
-
-        // Driver validated - create/login with temporary account
-        // Try to sign in first, if fails then sign up
-        try {
-          await signIn(identifier, password);
-        } catch (authError: any) {
-          // If sign in fails, try to sign up
-          try {
-            await signUp(identifier, password, 'driver');
-          } catch (signUpError: any) {
-            Alert.alert('Login Failed', 'Unable to login. Please contact admin.');
-            setLoading(false);
-            return;
-          }
-        }
-      } else {
-        // Admin login - regular email login
-        await signIn(identifier, password);
+        await AsyncStorage.setItem('currentUser', JSON.stringify({ 
+          role: 'driver', 
+          email: identifier,
+          id: bus.id,
+          name: bus.driver_full_name,
+          busNumber: bus.bus_number,
+          route: bus.route_number,
+          stops: bus.stops,
+        }));
+        await AsyncStorage.setItem('userRole', 'driver');
       }
-      // Navigation handled by auth state change
+
+      // Trigger navigation via callback
+      onLoginSuccess(role);
+
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message);
+      Alert.alert('Login Failed', error.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }

@@ -9,8 +9,8 @@ import {
   Dimensions,
   TouchableWithoutFeedback,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 
@@ -20,33 +20,30 @@ const DRAWER_WIDTH = width * 0.75;
 interface SideDrawerProps {
   visible: boolean;
   onClose: () => void;
+  onLogout?: () => void;
 }
 
-export default function SideDrawer({ visible, onClose }: SideDrawerProps) {
-  const { user, signOut } = useAuth();
+export default function SideDrawer({ visible, onClose, onLogout }: SideDrawerProps) {
   const { t, colors } = useSettings();
   const { unreadCount } = useNotifications();
   const navigation = useNavigation();
   const [slideAnim] = useState(new Animated.Value(-DRAWER_WIDTH));
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    AsyncStorage.getItem('userRole').then(role => setUserRole(role));
+  }, []);
 
   React.useEffect(() => {
     if (visible) {
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
+      Animated.timing(slideAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start();
     } else {
-      Animated.timing(slideAnim, {
-        toValue: -DRAWER_WIDTH,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
+      Animated.timing(slideAnim, { toValue: -DRAWER_WIDTH, duration: 300, useNativeDriver: true }).start();
     }
   }, [visible]);
 
   const handleLogout = async () => {
-    await signOut();
+    if (onLogout) onLogout();
     onClose();
   };
 
@@ -148,13 +145,13 @@ export default function SideDrawer({ visible, onClose }: SideDrawerProps) {
               <View style={styles.header}>
                 <Text style={styles.headerTitle}>{t('dashboard')}</Text>
                 <Text style={styles.headerSubtitle}>
-                  {user?.user_metadata?.role?.toUpperCase() || 'USER'}
+                  {userRole?.toUpperCase() || 'USER'}
                 </Text>
               </View>
 
               {/* Menu Items */}
               <View style={styles.menuItems}>
-                {user?.user_metadata?.role === 'admin' && (
+                {userRole === 'admin' && (
                   <>
                     <TouchableOpacity
                       style={styles.menuItem}
@@ -229,7 +226,7 @@ export default function SideDrawer({ visible, onClose }: SideDrawerProps) {
               {/* Footer */}
               <View style={styles.footer}>
                 <Text style={styles.footerText}>
-                  {user?.email}
+                  {userRole || ''}
                 </Text>
               </View>
             </Animated.View>
