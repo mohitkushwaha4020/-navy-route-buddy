@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { loginDriver, loginStudent } from "@/lib/db";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -34,20 +35,12 @@ const Login = () => {
       return;
     }
 
-    // Driver Login - Check from localStorage
+    // Driver Login - Check from Supabase
     if (role === "driver") {
-      const storedBuses = localStorage.getItem("buses");
-      const buses = storedBuses ? JSON.parse(storedBuses) : [];
-      
-      // Check if driver exists with matching email and password
-      const driver = buses.find(
-        (bus: any) => bus.driverEmail === identifier && bus.driverPassword === password
-      );
-
+      const driver = await loginDriver(identifier, password);
       if (driver) {
         toast.success(`Welcome, ${driver.driver}!`);
-        // Store driver info for dashboard
-        localStorage.setItem("currentDriver", JSON.stringify(driver));
+        sessionStorage.setItem("currentDriver", JSON.stringify(driver));
         navigate("/driver");
       } else {
         toast.error("Invalid driver credentials! Contact admin.");
@@ -56,20 +49,12 @@ const Login = () => {
       return;
     }
 
-    // Student Login - Check from localStorage
+    // Student Login - Check from Supabase
     if (role === "student") {
-      const storedStudents = localStorage.getItem("students");
-      const students = storedStudents ? JSON.parse(storedStudents) : [];
-      
-      // Check email and password only
-      const student = students.find(
-        (s: any) => s.email === identifier && s.password === password
-      );
-
+      const student = await loginStudent(identifier, password);
       if (student) {
         toast.success(`Welcome, ${student.name}!`);
-        // Store student info for dashboard
-        localStorage.setItem("currentStudent", JSON.stringify(student));
+        sessionStorage.setItem("currentStudent", JSON.stringify(student));
         navigate("/student");
       } else {
         toast.error("Invalid student credentials! Contact admin.");
@@ -234,17 +219,9 @@ const Login = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const storedBuses = localStorage.getItem("buses");
-                    const buses = storedBuses ? JSON.parse(storedBuses) : [];
-                    if (buses.length > 0 && buses[0].driverEmail && buses[0].driverPassword) {
-                      setIdentifier(buses[0].driverEmail);
-                      setPassword(buses[0].driverPassword);
-                      toast.info(`${buses[0].driver} credentials filled!`);
-                    } else {
-                      setIdentifier("driver@busbay.com");
-                      setPassword("driver123");
-                      toast.info("Demo driver credentials filled!");
-                    }
+                    setIdentifier("driver1@gmail.com");
+                    setPassword("Driver1");
+                    toast.info("Driver credentials filled!");
                   }}
                   className="w-full bg-white hover:bg-gray-50 border border-[#1e3a8a] text-[#1e3a8a] py-2.5 sm:py-3 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors"
                 >
@@ -268,17 +245,9 @@ const Login = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const storedStudents = localStorage.getItem("students");
-                    const students = storedStudents ? JSON.parse(storedStudents) : [];
-                    if (students.length > 0 && students[0].email && students[0].password) {
-                      setIdentifier(students[0].email);
-                      setPassword(students[0].password);
-                      toast.info(`${students[0].name} credentials filled!`);
-                    } else {
-                      setIdentifier("student@busbay.com");
-                      setPassword("student123");
-                      toast.info("Demo student credentials filled!");
-                    }
+                    setIdentifier("mohit@gmail.com");
+                    setPassword("mohit123");
+                    toast.info("Student credentials filled!");
                   }}
                   className="w-full bg-white hover:bg-gray-50 border border-[#1e3a8a] text-[#1e3a8a] py-2.5 sm:py-3 px-3 sm:px-4 rounded-lg text-xs sm:text-sm font-medium transition-colors"
                 >

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { RefreshCw, Menu, X, Bell, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "../contexts/LanguageContext";
+import { fetchBuses, fetchStudents, mapBus, mapStudent } from "@/lib/db";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ const AdminDashboard = () => {
     activeBuses: 0,
   });
   const [buses, setBuses] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [viewDetailsModal, setViewDetailsModal] = useState<any>(null);
@@ -29,32 +31,25 @@ const AdminDashboard = () => {
     fetchData();
   }, []);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     setLoading(true);
-    
     try {
-      // Get buses from localStorage
-      const storedBuses = localStorage.getItem("buses");
-      const busesData = storedBuses ? JSON.parse(storedBuses) : [];
-      
-      // Get students from localStorage
-      const storedStudents = localStorage.getItem("students");
-      const studentsData = storedStudents ? JSON.parse(storedStudents) : [];
-      
-      // Calculate stats from real data
+      const [busRows, studentRows] = await Promise.all([fetchBuses(), fetchStudents()]);
+      const busesData = busRows.map(mapBus);
+      const studentsData = studentRows.map(mapStudent);
+
+      setBuses(busesData);
+      setStudents(studentsData);
+
       const activeBusesCount = busesData.filter((b: any) => b.status === "active").length;
       const totalDrivers = new Set(busesData.map((b: any) => b.driver)).size;
-      const approvedStudents = studentsData.filter((s: any) => s.status === "approved").length;
-      const totalUsers = totalDrivers + studentsData.length;
-      
+
       setStats({
-        totalUsers: totalUsers,
-        totalDrivers: totalDrivers,
+        totalUsers: totalDrivers + studentsData.length,
+        totalDrivers,
         totalStudents: studentsData.length,
         activeBuses: activeBusesCount,
       });
-
-      setBuses(busesData);
       toast.success("Data refreshed successfully!");
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -75,7 +70,7 @@ const AdminDashboard = () => {
       return;
     }
 
-    // Create new notification
+    // Create new notification object
     const newNotification = {
       id: Date.now(),
       title: notificationForm.title,
@@ -85,19 +80,16 @@ const AdminDashboard = () => {
       recipient: notificationForm.recipient,
     };
 
-    // Save to appropriate localStorage based on recipient
+    // Store in sessionStorage so current session users can see it
     if (notificationForm.recipient === "students" || notificationForm.recipient === "both") {
-      const storedNotifications = localStorage.getItem("notifications");
-      const notifications = storedNotifications ? JSON.parse(storedNotifications) : [];
-      notifications.unshift(newNotification);
-      localStorage.setItem("notifications", JSON.stringify(notifications));
+      const existing = JSON.parse(sessionStorage.getItem("notifications") || "[]");
+      existing.unshift(newNotification);
+      sessionStorage.setItem("notifications", JSON.stringify(existing));
     }
-
     if (notificationForm.recipient === "drivers" || notificationForm.recipient === "both") {
-      const storedDriverNotifications = localStorage.getItem("driverNotifications");
-      const driverNotifications = storedDriverNotifications ? JSON.parse(storedDriverNotifications) : [];
-      driverNotifications.unshift(newNotification);
-      localStorage.setItem("driverNotifications", JSON.stringify(driverNotifications));
+      const existing = JSON.parse(sessionStorage.getItem("driverNotifications") || "[]");
+      existing.unshift(newNotification);
+      sessionStorage.setItem("driverNotifications", JSON.stringify(existing));
     }
 
     // Reset form and close modal
@@ -503,14 +495,11 @@ const AdminDashboard = () => {
               {showStatsModal === 'drivers' && (
                 <div className="space-y-4">
                   {(() => {
-                    const storedBuses = localStorage.getItem("buses");
-                    const busesData = storedBuses ? JSON.parse(storedBuses) : [];
-                    const drivers = Array.from(new Set(busesData.map((b: any) => b.driver)));
-                    
+                    const drivers = Array.from(new Set(buses.map((b: any) => b.driver)));
                     return drivers.length > 0 ? (
                       <div className="space-y-3">
                         {drivers.map((driver: any, index: number) => {
-                          const driverBuses = busesData.filter((b: any) => b.driver === driver);
+                          const driverBuses = buses.filter((b: any) => b.driver === driver);
                           return (
                             <div key={index} className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                               <div className="flex items-center justify-between mb-2">
@@ -546,39 +535,33 @@ const AdminDashboard = () => {
 
               {showStatsModal === 'students' && (
                 <div className="space-y-4">
-                  {(() => {
-                    const storedStudents = localStorage.getItem("students");
-                    const studentsData = storedStudents ? JSON.parse(storedStudents) : [];
-                    
-                    return studentsData.length > 0 ? (
-                      <div className="space-y-3">
-                        {studentsData.map((student: any, index: number) => (
-                          <div key={index} className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="font-bold text-[#1e3a8a]">🎓 {student.name}</h3>
-                              <span className={`text-xs px-2 py-1 rounded-full ${
-                                student.status === 'approved' 
-                                  ? 'bg-green-100 text-green-700' 
-                                  : 'bg-yellow-100 text-yellow-700'
-                              }`}>
-                                {student.status === 'approved' ? '✅ Approved' : '⏳ Pending'}
-                              </span>
-                            </div>
-                            <div className="space-y-1 text-sm text-gray-700">
-                              <div>📧 {student.email}</div>
-                              <div>🚌 Bus: {student.bus || 'Not assigned'}</div>
-                              <div>📍 Pickup: {student.pickupLocation || 'Not set'}</div>
-                            </div>
+                  {students.length > 0 ? (
+                    <div className="space-y-3">
+                      {students.map((student: any, index: number) => (
+                        <div key={index} className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="font-bold text-[#1e3a8a]">🎓 {student.name}</h3>
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              student.status === 'approved'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {student.status === 'approved' ? '✅ Approved' : '⏳ Pending'}
+                            </span>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8">
-                        <div className="text-6xl mb-4">🎓</div>
-                        <p className="text-gray-600">No students found</p>
-                      </div>
-                    );
-                  })()}
+                          <div className="space-y-1 text-sm text-gray-700">
+                            <div>📧 {student.email}</div>
+                            <div>📍 Pickup: {student.pickupPoint || 'Not set'}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="text-6xl mb-4">🎓</div>
+                      <p className="text-gray-600">No students found</p>
+                    </div>
+                  )}
                 </div>
               )}
 

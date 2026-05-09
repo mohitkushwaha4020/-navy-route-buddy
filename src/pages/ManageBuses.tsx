@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, X, Eye, EyeOff, Search } from "lucide-react";
 import { toast } from "sonner";
+import { fetchBuses, addBus, updateBus, deleteBus, mapBus } from "@/lib/db";
 
 interface Bus {
   id: number;
@@ -23,18 +24,12 @@ const ManageBuses = () => {
   const [buses, setBuses] = useState<Bus[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Load buses from localStorage on mount
+  // Load buses from Supabase on mount
   useEffect(() => {
-    const storedBuses = localStorage.getItem("buses");
-    if (storedBuses) {
-      setBuses(JSON.parse(storedBuses));
-    }
+    fetchBuses()
+      .then((rows) => setBuses(rows.map(mapBus) as Bus[]))
+      .catch(() => toast.error("Failed to load buses"));
   }, []);
-
-  // Save buses to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem("buses", JSON.stringify(buses));
-  }, [buses]);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -55,40 +50,37 @@ const ManageBuses = () => {
   const [showPhotoOptions, setShowPhotoOptions] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!formData.busNumber || !formData.driver || !formData.driverEmail || !formData.driverPhone) {
       toast.error("Please fill all required fields!");
       return;
     }
-
-    const newBus: Bus = {
-      id: Date.now(),
-      ...formData,
-      students: 0,
-      currentLocation: "Parking",
-    };
-
-    setBuses([...buses, newBus]);
-    setShowAddModal(false);
-    resetForm();
-    toast.success("Bus added successfully!");
+    try {
+      const row = await addBus(formData);
+      setBuses([mapBus(row) as Bus, ...buses]);
+      setShowAddModal(false);
+      resetForm();
+      toast.success("Bus added successfully!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add bus");
+    }
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!selectedBus || !formData.busNumber || !formData.driver || !formData.driverEmail || !formData.driverPhone) {
       toast.error("Please fill all required fields!");
       return;
     }
-
-    setBuses(buses.map(bus => 
-      bus.id === selectedBus.id 
-        ? { ...bus, ...formData }
-        : bus
-    ));
-    setShowEditModal(false);
-    setSelectedBus(null);
-    resetForm();
-    toast.success("Bus updated successfully!");
+    try {
+      const row = await updateBus(String(selectedBus.id), formData);
+      setBuses(buses.map(bus => bus.id === selectedBus.id ? mapBus(row) as Bus : bus));
+      setShowEditModal(false);
+      setSelectedBus(null);
+      resetForm();
+      toast.success("Bus updated successfully!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update bus");
+    }
   };
 
   const resetForm = () => {
@@ -147,13 +139,17 @@ const ManageBuses = () => {
     setShowPhotoOptions(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!selectedBus) return;
-
-    setBuses(buses.filter(bus => bus.id !== selectedBus.id));
-    setShowDeleteModal(false);
-    setSelectedBus(null);
-    toast.success("Bus deleted successfully!");
+    try {
+      await deleteBus(String(selectedBus.id));
+      setBuses(buses.filter(bus => bus.id !== selectedBus.id));
+      setShowDeleteModal(false);
+      setSelectedBus(null);
+      toast.success("Bus deleted successfully!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete bus");
+    }
   };
 
   const openEditModal = (bus: Bus) => {

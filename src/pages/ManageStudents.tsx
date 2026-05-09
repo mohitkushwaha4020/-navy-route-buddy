@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, X, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { fetchStudents, addStudent, updateStudent, approveStudent, mapStudent, fetchBuses, mapBus, deleteStudent } from "@/lib/db";
 
 interface Student {
   id: number;
@@ -12,7 +13,7 @@ interface Student {
   phone?: string;
   status: "approved" | "pending";
   pickupPoint?: string;
-  assignedBusId?: number;
+  assignedBusId?: string;
 }
 
 const ManageStudents = () => {
@@ -22,33 +23,27 @@ const ManageStudents = () => {
   const [buses, setBuses] = useState<any[]>([]);
   const [availableStops, setAvailableStops] = useState<string[]>([]);
 
-  // Load students from localStorage on mount
+  // Load students and buses from Supabase on mount
   useEffect(() => {
-    const storedStudents = localStorage.getItem("students");
-    if (storedStudents) {
-      setStudents(JSON.parse(storedStudents));
-    }
-    
-    // Load buses for pickup point selection
-    const storedBuses = localStorage.getItem("buses");
-    if (storedBuses) {
-      setBuses(JSON.parse(storedBuses));
-      
-      // Extract all unique stops from all buses
-      const allStops = new Set<string>();
-      JSON.parse(storedBuses).forEach((bus: any) => {
-        if (bus.stops && Array.isArray(bus.stops)) {
-          bus.stops.forEach((stop: string) => allStops.add(stop));
-        }
-      });
-      setAvailableStops(Array.from(allStops).sort());
-    }
-  }, []);
+    fetchStudents()
+      .then((rows) => {
+        const mapped = rows.map(mapStudent) as Student[];
+        setStudents(mapped);
+      })
+      .catch(() => toast.error("Failed to load students"));
 
-  // Save students to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem("students", JSON.stringify(students));
-  }, [students]);
+    fetchBuses()
+      .then((rows) => {
+        const mapped = rows.map(mapBus);
+        setBuses(mapped);
+        const allStops = new Set<string>();
+        mapped.forEach((bus: any) => {
+          if (bus.stops) bus.stops.forEach((s: string) => allStops.add(s));
+        });
+        setAvailableStops(Array.from(allStops).sort());
+      })
+      .catch(() => {});
+  }, []);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -62,24 +57,24 @@ const ManageStudents = () => {
     phone: "",
     status: "pending" as "approved" | "pending",
     pickupPoint: "",
-    assignedBusId: undefined as number | undefined,
+    assignedBusId: undefined as string | undefined,
   });
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!formData.name || !formData.email || !formData.rollNo || !formData.phone) {
       toast.error("Please fill all required fields!");
       return;
     }
-
-    const newStudent: Student = {
-      id: Date.now(),
-      ...formData,
-    };
-
-    setStudents([...students, newStudent]);
-    setShowAddModal(false);
-    setFormData({ name: "", email: "", password: "", rollNo: "", phone: "", status: "pending", pickupPoint: "", assignedBusId: undefined });
-    toast.success("Student added successfully!");
+    try {
+      const row = await addStudent(formData);
+      const mapped = mapStudent(row) as Student;
+      setStudents([mapped, ...students]);
+      setShowAddModal(false);
+      setFormData({ name: "", email: "", password: "", rollNo: "", phone: "", status: "pending", pickupPoint: "", assignedBusId: undefined });
+      toast.success("Student added successfully!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add student");
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent, nextFieldId?: string) => {
@@ -94,13 +89,14 @@ const ManageStudents = () => {
     }
   };
 
-  const handleApprove = (studentId: number) => {
-    setStudents(students.map(student => 
-      student.id === studentId 
-        ? { ...student, status: "approved" as "approved" | "pending" }
-        : student
-    ));
-    toast.success("Student approved!");
+  const handleApprove = async (studentId: number | string) => {
+    try {
+      await approveStudent(String(studentId));
+      setStudents(students.map(s => s.id === studentId ? { ...s, status: "approved" as const } : s));
+      toast.success("Student approved!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to approve student");
+    }
   };
 
   const openDetailsModal = (student: Student) => {
@@ -124,21 +120,22 @@ const ManageStudents = () => {
     setShowEditModal(true);
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!selectedStudent || !formData.name || !formData.email || !formData.rollNo || !formData.phone) {
       toast.error("Please fill all required fields!");
       return;
     }
-
-    setStudents(students.map(student => 
-      student.id === selectedStudent.id 
-        ? { ...student, ...formData }
-        : student
-    ));
-    setShowEditModal(false);
-    setSelectedStudent(null);
-    setFormData({ name: "", email: "", password: "", rollNo: "", phone: "", status: "pending", pickupPoint: "", assignedBusId: undefined });
-    toast.success("Student updated successfully!");
+    try {
+      const row = await updateStudent(String(selectedStudent.id), formData);
+      const mapped = mapStudent(row) as Student;
+      setStudents(students.map(s => s.id === selectedStudent.id ? mapped : s));
+      setShowEditModal(false);
+      setSelectedStudent(null);
+      setFormData({ name: "", email: "", password: "", rollNo: "", phone: "", status: "pending", pickupPoint: "", assignedBusId: undefined });
+      toast.success("Student updated successfully!");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update student");
+    }
   };
 
   return (
@@ -333,11 +330,11 @@ const ManageStudents = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Assign Specific Bus (Optional)</label>
                   <select
                     value={formData.assignedBusId || ""}
-                    onChange={(e) => setFormData({ ...formData, assignedBusId: e.target.value ? Number(e.target.value) : undefined })}
+                    onChange={(e) => setFormData({ ...formData, assignedBusId: e.target.value ? e.target.value : undefined })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent outline-none"
                   >
                     <option value="">No specific bus</option>
-                    {buses.filter(b => b.stops && b.stops.includes(formData.pickupPoint)).map((bus) => (
+                    {buses.filter(b => b.stops && b.stops.some((s: string) => s.toLowerCase().trim() === formData.pickupPoint.toLowerCase().trim())).map((bus) => (
                       <option key={bus.id} value={bus.id}>
                         {bus.busNumber} - {bus.driver} ({bus.route})
                       </option>
@@ -527,11 +524,11 @@ const ManageStudents = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">Assign Specific Bus (Optional)</label>
                   <select
                     value={formData.assignedBusId || ""}
-                    onChange={(e) => setFormData({ ...formData, assignedBusId: e.target.value ? Number(e.target.value) : undefined })}
+                    onChange={(e) => setFormData({ ...formData, assignedBusId: e.target.value ? e.target.value : undefined })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent outline-none"
                   >
                     <option value="">No specific bus</option>
-                    {buses.filter(b => b.stops && b.stops.includes(formData.pickupPoint)).map((bus) => (
+                    {buses.filter(b => b.stops && b.stops.some((s: string) => s.toLowerCase().trim() === formData.pickupPoint.toLowerCase().trim())).map((bus) => (
                       <option key={bus.id} value={bus.id}>
                         {bus.busNumber} - {bus.driver} ({bus.route})
                       </option>

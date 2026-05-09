@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fetchStudents, mapStudent, loginDriver } from "@/lib/db";
 
 // Mock data
 const mockRoute = {
@@ -50,72 +51,53 @@ const DriverDashboard = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
 
-  // Load driver info from localStorage
+  // Load driver info from sessionStorage (set at login), then refresh from Supabase
   useEffect(() => {
-    const currentDriver = localStorage.getItem("currentDriver");
+    const currentDriver = sessionStorage.getItem("currentDriver");
     if (currentDriver) {
-      setDriverInfo(JSON.parse(currentDriver));
-      // Keep in idle mode on login
+      const driver = JSON.parse(currentDriver);
+      setDriverInfo(driver);
       setJourneyStatus("idle");
+      loadStudentsForDriver(driver);
+
+      // Refresh from Supabase
+      if (driver.driverEmail && driver.driverPassword) {
+        loginDriver(driver.driverEmail, driver.driverPassword).then((fresh) => {
+          if (fresh) {
+            setDriverInfo(fresh);
+            sessionStorage.setItem("currentDriver", JSON.stringify(fresh));
+            loadStudentsForDriver(fresh);
+          }
+        });
+      }
     }
 
-    // Load driver notifications
-    const storedNotifications = localStorage.getItem("driverNotifications");
+    // Load driver notifications from sessionStorage
+    const storedNotifications = sessionStorage.getItem("driverNotifications");
     if (storedNotifications) {
       setNotifications(JSON.parse(storedNotifications));
     }
   }, []);
 
-  // Load students data and calculate students per stop
-  useEffect(() => {
-    if (!driverInfo?.stops) return;
-
-    const storedStudents = localStorage.getItem("students");
-    if (storedStudents) {
-      const students = JSON.parse(storedStudents);
-      
-      // Group students by pickup point
+  const loadStudentsForDriver = async (driver: any) => {
+    if (!driver?.stops) return;
+    try {
+      const rows = await fetchStudents();
+      const allStudents = rows.map(mapStudent);
       const stopMap: Record<string, any[]> = {};
-      driverInfo.stops.forEach((stop: string) => {
-        stopMap[stop] = students.filter((s: any) => s.pickupPoint === stop);
+      driver.stops.forEach((stop: string) => {
+        stopMap[stop] = allStudents.filter((s: any) =>
+          s.pickupPoint?.toLowerCase().trim() === stop.toLowerCase().trim()
+        );
       });
-      
       setStudentsPerStop(stopMap);
+    } catch {
+      // silent fail
     }
-  }, [driverInfo]);
+  };
 
   const handleStartJourney = () => {
     setJourneyStatus("active");
-    
-    // Save journey status to localStorage so students can see it
-    if (driverInfo) {
-      const journeyData = {
-        busId: driverInfo.id,
-        busNumber: driverInfo.busNumber,
-        driver: driverInfo.driver,
-        route: driverInfo.route,
-        status: "active",
-        currentStop: 0,
-        stops: driverInfo.stops || [],
-        startTime: new Date().toISOString(),
-        // Simulated location (in real app, this would be GPS)
-        location: {
-          lat: 28.6139,
-          lng: 77.2090,
-          timestamp: new Date().toISOString()
-        }
-      };
-      
-      // Save to localStorage
-      localStorage.setItem(`journey_${driverInfo.id}`, JSON.stringify(journeyData));
-      
-      // Update active journeys list
-      const activeJourneys = JSON.parse(localStorage.getItem("activeJourneys") || "[]");
-      const updated = activeJourneys.filter((j: any) => j.busId !== driverInfo.id);
-      updated.push(journeyData);
-      localStorage.setItem("activeJourneys", JSON.stringify(updated));
-    }
-    
     toast.success("Journey started! Location tracking is now active.");
   };
 
@@ -131,17 +113,6 @@ const DriverDashboard = () => {
 
   const handleEndJourney = () => {
     setJourneyStatus("idle");
-    
-    // Remove journey from localStorage
-    if (driverInfo) {
-      localStorage.removeItem(`journey_${driverInfo.id}`);
-      
-      // Update active journeys list
-      const activeJourneys = JSON.parse(localStorage.getItem("activeJourneys") || "[]");
-      const updated = activeJourneys.filter((j: any) => j.busId !== driverInfo.id);
-      localStorage.setItem("activeJourneys", JSON.stringify(updated));
-    }
-    
     toast.success("Journey completed! Great job.");
   };
 
@@ -158,24 +129,9 @@ const DriverDashboard = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         const photoUrl = reader.result as string;
-        
-        // Update driver info with new photo
         const updatedDriver = { ...driverInfo, photo: photoUrl };
         setDriverInfo(updatedDriver);
-        
-        // Update in localStorage
-        localStorage.setItem("currentDriver", JSON.stringify(updatedDriver));
-        
-        // Update in buses array
-        const storedBuses = localStorage.getItem("buses");
-        if (storedBuses) {
-          const buses = JSON.parse(storedBuses);
-          const updatedBuses = buses.map((bus: any) => 
-            bus.id === driverInfo.id ? { ...bus, photo: photoUrl } : bus
-          );
-          localStorage.setItem("buses", JSON.stringify(updatedBuses));
-        }
-        
+        sessionStorage.setItem("currentDriver", JSON.stringify(updatedDriver));
         setShowPhotoUpload(false);
         toast.success("Profile photo updated!");
       };
@@ -189,17 +145,17 @@ const DriverDashboard = () => {
   };
 
   const handleMarkAsRead = (notificationId: number) => {
-    const updatedNotifications = notifications.map(n => 
+    const updatedNotifications = notifications.map(n =>
       n.id === notificationId ? { ...n, read: true } : n
     );
     setNotifications(updatedNotifications);
-    localStorage.setItem("driverNotifications", JSON.stringify(updatedNotifications));
+    sessionStorage.setItem("driverNotifications", JSON.stringify(updatedNotifications));
   };
 
   const handleDeleteNotification = (notificationId: number) => {
     const updatedNotifications = notifications.filter(n => n.id !== notificationId);
     setNotifications(updatedNotifications);
-    localStorage.setItem("driverNotifications", JSON.stringify(updatedNotifications));
+    sessionStorage.setItem("driverNotifications", JSON.stringify(updatedNotifications));
     toast.success("Notification deleted");
   };
 

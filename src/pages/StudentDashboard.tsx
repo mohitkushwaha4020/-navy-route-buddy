@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Bell, ChevronDown, Navigation, MapPin, X, Camera, Upload, Trash2, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fetchBuses, mapBus, loginStudent } from "@/lib/db";
 
 const StudentDashboard = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -26,16 +27,27 @@ const StudentDashboard = () => {
 
   // Load student info and buses
   useEffect(() => {
-    const currentStudent = localStorage.getItem("currentStudent");
+    const currentStudent = sessionStorage.getItem("currentStudent");
     if (currentStudent) {
-      const student = JSON.parse(currentStudent);
-      setStudentInfo(student);
-      
-      loadBusesAndJourneys(student);
+      const cached = JSON.parse(currentStudent);
+      setStudentInfo(cached);
+      loadBusesAndJourneys(cached);
+
+      // Refresh student data from Supabase to get latest pickupPoint/assignedBusId
+      if (cached.email && cached.password) {
+        loginStudent(cached.email, cached.password).then((fresh) => {
+          if (fresh) {
+            const updated = { ...cached, ...fresh };
+            setStudentInfo(updated);
+            sessionStorage.setItem("currentStudent", JSON.stringify(updated));
+            loadBusesAndJourneys(updated);
+          }
+        });
+      }
     }
 
-    // Load notifications
-    const storedNotifications = localStorage.getItem("notifications");
+    // Load notifications from sessionStorage
+    const storedNotifications = sessionStorage.getItem("notifications");
     if (storedNotifications) {
       setNotifications(JSON.parse(storedNotifications));
     }
@@ -52,20 +64,21 @@ const StudentDashboard = () => {
     return () => clearInterval(interval);
   }, [studentInfo]);
 
-  const loadBusesAndJourneys = (student: any) => {
-    // Load all buses
-    const storedBuses = localStorage.getItem("buses");
-    if (storedBuses) {
-      const allBuses = JSON.parse(storedBuses);
+  const loadBusesAndJourneys = async (student: any) => {
+    try {
+      // Load buses from Supabase
+      const rows = await fetchBuses();
+      const allBuses = rows.map(mapBus);
       setBuses(allBuses);
-      
+
       // Filter buses by student's pickup point
       if (student.pickupPoint) {
-        const filtered = allBuses.filter((bus: any) => 
-          bus.stops && Array.isArray(bus.stops) && bus.stops.includes(student.pickupPoint)
+        const filtered = allBuses.filter((bus: any) =>
+          bus.stops && Array.isArray(bus.stops) &&
+          bus.stops.some((s: string) => s.toLowerCase().trim() === student.pickupPoint.toLowerCase().trim())
         );
-        
-        // Sort: assigned bus first, then others
+
+        // Sort: assigned bus first
         const sorted = filtered.sort((a: any, b: any) => {
           if (student.assignedBusId) {
             if (a.id === student.assignedBusId) return -1;
@@ -73,21 +86,28 @@ const StudentDashboard = () => {
           }
           return 0;
         });
-        
+
         setRouteBuses(sorted);
       }
+    } catch {
+      // fallback to localStorage
+      const storedBuses = localStorage.getItem("buses");
+      if (storedBuses) {
+        const allBuses = JSON.parse(storedBuses);
+        setBuses(allBuses);
+        if (student.pickupPoint) {
+          const filtered = allBuses.filter((bus: any) =>
+            bus.stops && Array.isArray(bus.stops) && bus.stops.includes(student.pickupPoint)
+          );
+          setRouteBuses(filtered);
+        }
+      }
     }
-    
+
     // Load active journeys
     const storedJourneys = localStorage.getItem("activeJourneys");
     if (storedJourneys) {
-      const journeys = JSON.parse(storedJourneys);
-      // Filter journeys for buses at student's pickup point
-      const relevantJourneys = journeys.filter((j: any) => {
-        const bus = buses.find((b: any) => b.id === j.busId);
-        return bus && bus.stops && bus.stops.includes(student.pickupPoint);
-      });
-      setActiveJourneys(relevantJourneys);
+      setActiveJourneys(JSON.parse(storedJourneys));
     }
   };
 
@@ -119,18 +139,7 @@ const StudentDashboard = () => {
         // Update student info
         const updatedStudent = { ...studentInfo, photo: photoData };
         setStudentInfo(updatedStudent);
-        localStorage.setItem("currentStudent", JSON.stringify(updatedStudent));
-        
-        // Update in students array
-        const storedStudents = localStorage.getItem("students");
-        if (storedStudents) {
-          const students = JSON.parse(storedStudents);
-          const updatedStudents = students.map((s: any) => 
-            s.email === studentInfo.email ? updatedStudent : s
-          );
-          localStorage.setItem("students", JSON.stringify(updatedStudents));
-        }
-        
+        sessionStorage.setItem("currentStudent", JSON.stringify(updatedStudent));
         toast.success("Profile photo updated successfully!");
         setPhotoMenuOpen(false);
       };
@@ -164,13 +173,13 @@ const StudentDashboard = () => {
       n.id === notificationId ? { ...n, read: true } : n
     );
     setNotifications(updatedNotifications);
-    localStorage.setItem("notifications", JSON.stringify(updatedNotifications));
+    sessionStorage.setItem("notifications", JSON.stringify(updatedNotifications));
   };
 
   const handleDeleteNotification = (notificationId: number) => {
     const updatedNotifications = notifications.filter(n => n.id !== notificationId);
     setNotifications(updatedNotifications);
-    localStorage.setItem("notifications", JSON.stringify(updatedNotifications));
+    sessionStorage.setItem("notifications", JSON.stringify(updatedNotifications));
     toast.success("Notification deleted");
   };
 
